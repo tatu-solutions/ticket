@@ -12,6 +12,8 @@ jobs:
     name: Deploy para VPS (Ambiente QaS)
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: read
 
     steps:
       - name: Executar Deploy na VPS via SSH
@@ -24,22 +26,28 @@ jobs:
           script_stop: true
           command_timeout: 25m
           script: |
-            echo "🚀 [GitHub Actions] Iniciando deploy em /var/www/tdesk..."
+            set -e
+            echo "🚀 [GitHub Actions] Conectado à VPS. Sincronizando repositório..."
             
-            if [ -d "/var/www/tdesk/.git" ]; then
-              cd /var/www/tdesk
-              git remote set-url origin https://github.com/tatu-solutions/ticket.git
-              git fetch origin QaS
-              git checkout -B QaS origin/QaS
-              git pull origin QaS
-            else
-              mkdir -p /var/www/tdesk
-              cd /var/www/tdesk
+            APP_DIR="/var/www/tdesk"
+            REPO_URL="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/tatu-solutions/ticket.git"
+            
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+            
+            if [ ! -d ".git" ]; then
+              echo "📦 Inicializando repositório Git em $APP_DIR..."
               git init
-              git remote add origin https://github.com/tatu-solutions/ticket.git || git remote set-url origin https://github.com/tatu-solutions/ticket.git
-              git fetch origin QaS
-              git checkout -B QaS origin/QaS
+              git remote add origin "$REPO_URL"
+            else
+              git remote set-url origin "$REPO_URL"
             fi
-
-            chmod +x /var/www/tdesk/scripts/deploy-qas.sh
-            bash /var/www/tdesk/scripts/deploy-qas.sh
+            
+            echo "📥 Atualizando código a partir da branch QaS..."
+            git fetch origin QaS
+            git checkout -f -B QaS origin/QaS
+            git reset --hard origin/QaS
+            
+            echo "🔧 Executando script de deploy..."
+            chmod +x scripts/deploy-qas.sh
+            bash scripts/deploy-qas.sh

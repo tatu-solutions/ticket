@@ -23,20 +23,8 @@ fi
 
 cd "$APP_DIR"
 
-# 2. Configurar Git se necessário
-if [ ! -d ".git" ]; then
-  echo "📦 Repositório Git não encontrado em $APP_DIR. Configurando..."
-  git init
-  git remote add origin "$REPO_URL"
-fi
-
-# Configurar remote atualizado
-git remote set-url origin "$REPO_URL" || true
-
-echo "📥 Atualizando código-fonte a partir da branch $BRANCH..."
-git fetch origin "$BRANCH"
-git checkout -B "$BRANCH" "origin/$BRANCH"
-git reset --hard "origin/$BRANCH"
+# 2. Garantir que estamos no diretório da aplicação
+cd "$APP_DIR"
 
 # 3. BACKEND
 echo "⚙️ Atualizando Backend..."
