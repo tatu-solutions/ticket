@@ -1,6 +1,7 @@
 import { Op } from 'sequelize';
 import OrganizationUser from '../models/OrganizationUser.js';
 import ClientUser from '../modules/clients/clientUserModel.js';
+import User from '../modules/users/userModel.js';
 import ContextSession from '../models/ContextSession.js';
 import ContextAuditLog from '../models/ContextAuditLog.js';
 import Organization from '../modules/organizations/organizationModel.js';
@@ -18,7 +19,52 @@ class ContextService {
     try {
       const contexts = [];
 
-      // Buscar contextos de organização
+      // 1. Buscar contextos de PROVIDER (backoffice - tabela users)
+      const providerUsers = await User.scope('withPassword').findAll({
+        where: { 
+          email, 
+          isActive: true,
+          role: { 
+            [Op.in]: ['super-admin', 'provider-admin', 'provider-support'] 
+          }
+        },
+        include: [{
+          model: Organization,
+          as: 'organization',
+          where: { isActive: true },
+          required: true
+        }]
+      });
+
+      // Validar senha e adicionar contextos de provider
+      for (const providerUser of providerUsers) {
+        // Se senha foi fornecida, validar
+        if (password) {
+          const isValid = await providerUser.comparePassword(password);
+          if (!isValid) continue;
+        }
+
+        contexts.push({
+          id: providerUser.id,
+          type: 'provider',
+          userId: providerUser.id,
+          userType: 'provider',
+          contextId: providerUser.organizationId,
+          contextType: 'provider',
+          organizationId: providerUser.organizationId,
+          organizationName: providerUser.organization?.name || 'Unknown',
+          organizationSlug: providerUser.organization?.slug,
+          email: providerUser.email,
+          name: providerUser.name,
+          role: providerUser.role,
+          permissions: providerUser.permissions,
+          avatar: providerUser.avatar,
+          isLastUsed: false,
+          lastAccessedAt: null
+        });
+      }
+
+      // 2. Buscar contextos de ORGANIZAÇÃO (staff - tabela organization_users)
       const orgUsers = await OrganizationUser.scope('withPassword').findAll({
         where: { email, isActive: true },
         include: [{
@@ -57,7 +103,7 @@ class ContextService {
         });
       }
 
-      // Buscar contextos de cliente
+      // 3. Buscar contextos de CLIENTE (empresas B2B - tabela client_users)
       const clientUsers = await ClientUser.scope('withPassword').findAll({
         where: { email, isActive: true },
         include: [
@@ -142,12 +188,44 @@ class ContextService {
    * Validar se um usuário tem acesso a um contexto específico
    * @param {string} email - Email do usuário
    * @param {string} contextId - ID do contexto (organizationId ou clientId)
-   * @param {string} contextType - Tipo do contexto ('organization' ou 'client')
+   * @param {string} contextType - Tipo do contexto ('provider', 'organization' ou 'client')
    * @returns {Promise<Object|null>} Dados do usuário se válido, null caso contrário
    */
   async validateContextAccess(email, contextId, contextType) {
     try {
-      if (contextType === 'organization') {
+      if (contextType === 'provider') {
+        const providerUser = await User.findOne({
+          where: {
+            email,
+            organizationId: contextId,
+            isActive: true,
+            role: { 
+              [Op.in]: ['super-admin', 'provider-admin', 'provider-support'] 
+            }
+          },
+          include: [{
+            model: Organization,
+            as: 'organization',
+            where: { isActive: true },
+            required: true
+          }]
+        });
+
+        if (!providerUser) return null;
+
+        return {
+          userId: providerUser.id,
+          userType: 'provider',
+          contextId: providerUser.organizationId,
+          contextType: 'provider',
+          email: providerUser.email,
+          name: providerUser.name,
+          role: providerUser.role,
+          permissions: providerUser.permissions,
+          organizationId: providerUser.organizationId,
+          organizationName: providerUser.organization?.name
+        };
+      } else if (contextType === 'organization') {
         const orgUser = await OrganizationUser.findOne({
           where: {
             email,
@@ -227,9 +305,9 @@ class ContextService {
   /**
    * Criar uma nova sessão de contexto
    * @param {string} userId - ID do usuário
-   * @param {string} userType - Tipo do usuário ('organization' ou 'client')
+   * @param {string} userType - Tipo do usuário ('provider', 'organization' ou 'client')
    * @param {string} contextId - ID do contexto
-   * @param {string} contextType - Tipo do contexto ('organization' ou 'client')
+   * @param {string} contextType - Tipo do contexto ('provider', 'organization' ou 'client')
    * @param {string} ipAddress - Endereço IP do cliente
    * @param {string} userAgent - User agent do navegador
    * @returns {Promise<Object>} Sessão criada
@@ -330,7 +408,38 @@ class ContextService {
       // Buscar dados completos do contexto
       let contextData = null;
 
-      if (session.contextType === 'organization') {
+      if (session.contextType === 'provider') {
+        const providerUser = await User.findOne({
+          where: {
+            id: session.userId,
+            organizationId: session.contextId,
+            isActive: true
+          },
+          include: [{
+            model: Organization,
+            as: 'organization',
+            where: { isActive: true },
+            required: true
+          }]
+        });
+
+        if (providerUser) {
+          contextData = {
+            sessionId: session.id,
+            userId: providerUser.id,
+            userType: 'provider',
+            contextId: providerUser.organizationId,
+            contextType: 'provider',
+            email: providerUser.email,
+            name: providerUser.name,
+            role: providerUser.role,
+            permissions: providerUser.permissions,
+            organizationId: providerUser.organizationId,
+            organizationName: providerUser.organization?.name,
+            avatar: providerUser.avatar
+          };
+        }
+      } else if (session.contextType === 'organization') {
         const orgUser = await OrganizationUser.findOne({
           where: {
             id: session.userId,
@@ -553,7 +662,7 @@ class ContextService {
    * Armazenar contexto preferido do usuário
    * @param {string} email - Email do usuário
    * @param {string} contextId - ID do contexto preferido
-   * @param {string} contextType - Tipo do contexto preferido ('organization' ou 'client')
+   * @param {string} contextType - Tipo do contexto preferido ('provider', 'organization' ou 'client')
    * @returns {Promise<boolean>} True se armazenado com sucesso
    */
   async setPreferredContext(email, contextId, contextType) {
@@ -567,7 +676,10 @@ class ContextService {
       }
 
       // Atualizar settings do usuário no modelo apropriado
-      const Model = contextType === 'organization' ? OrganizationUser : ClientUser;
+      const Model = contextType === 'provider' ? User 
+        : contextType === 'organization' ? OrganizationUser 
+        : ClientUser;
+      
       const user = await Model.findByPk(contextData.userId);
 
       if (!user) {
@@ -609,7 +721,11 @@ class ContextService {
    */
   async getPreferredContext(email) {
     try {
-      // Buscar em ambas as tabelas
+      // Buscar em todas as três tabelas
+      const providerUser = await User.findOne({
+        where: { email, isActive: true }
+      });
+
       const orgUser = await OrganizationUser.findOne({
         where: { email, isActive: true }
       });
@@ -621,8 +737,16 @@ class ContextService {
       // Verificar se algum usuário tem contexto preferido definido
       let preferredContext = null;
 
+      if (providerUser?.settings?.preferredContext) {
+        preferredContext = providerUser.settings.preferredContext;
+      }
+
       if (orgUser?.settings?.preferredContext) {
-        preferredContext = orgUser.settings.preferredContext;
+        // Se ambos têm preferência, usar o mais recente
+        if (!preferredContext || 
+            new Date(orgUser.settings.preferredContext.updatedAt) > new Date(preferredContext.updatedAt)) {
+          preferredContext = orgUser.settings.preferredContext;
+        }
       }
 
       if (clientUser?.settings?.preferredContext) {

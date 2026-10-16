@@ -206,10 +206,10 @@ export const selectContext = async (req, res, next) => {
     }
 
     // Validar contextType
-    if (!['organization', 'client'].includes(contextType)) {
+    if (!['provider', 'organization', 'client'].includes(contextType)) {
       return res.status(400).json({
         error: 'Tipo de contexto inválido',
-        details: 'contextType deve ser "organization" ou "client"'
+        details: 'contextType deve ser "provider", "organization" ou "client"'
       });
     }
 
@@ -225,7 +225,10 @@ export const selectContext = async (req, res, next) => {
     }
 
     // Validar senha
-    const Model = contextType === 'organization' ? OrganizationUser : ClientUser;
+    const Model = contextType === 'provider' ? User
+      : contextType === 'organization' ? OrganizationUser 
+      : ClientUser;
+    
     const userRecord = await Model.scope('withPassword').findByPk(contextData.userId);
 
     if (!userRecord) {
@@ -734,10 +737,10 @@ export const switchContext = async (req, res, next) => {
     }
 
     // Validar contextType
-    if (!['organization', 'client'].includes(contextType)) {
+    if (!['provider', 'organization', 'client'].includes(contextType)) {
       return res.status(400).json({
         error: 'Tipo de contexto inválido',
-        details: 'contextType deve ser "organization" ou "client"'
+        details: 'contextType deve ser "provider", "organization" ou "client"'
       });
     }
 
@@ -788,7 +791,10 @@ export const switchContext = async (req, res, next) => {
     debug('✅ New session created:', newSession.id);
 
     // Atualizar último login no modelo apropriado
-    const Model = newContextData.userType === 'organization' ? OrganizationUser : ClientUser;
+    const Model = newContextData.userType === 'provider' ? User
+      : newContextData.userType === 'organization' ? OrganizationUser 
+      : ClientUser;
+    
     const userRecord = await Model.findByPk(newContextData.userId);
     if (userRecord) {
       await userRecord.update({ lastLogin: new Date() });

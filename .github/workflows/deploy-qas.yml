@@ -1,0 +1,45 @@
+name: Deploy QaS Automático
+
+on:
+  push:
+    branches:
+      - QaS
+      - qas
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy para VPS (Ambiente QaS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Executar Deploy na VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          command_timeout: 25m
+          script: |
+            echo "🚀 [GitHub Actions] Iniciando deploy em /var/www/tdesk..."
+            
+            if [ -d "/var/www/tdesk/.git" ]; then
+              cd /var/www/tdesk
+              git remote set-url origin https://github.com/tatu-solutions/ticket.git
+              git fetch origin QaS
+              git checkout -B QaS origin/QaS
+              git pull origin QaS
+            else
+              mkdir -p /var/www/tdesk
+              cd /var/www/tdesk
+              git init
+              git remote add origin https://github.com/tatu-solutions/ticket.git || git remote set-url origin https://github.com/tatu-solutions/ticket.git
+              git fetch origin QaS
+              git checkout -B QaS origin/QaS
+            fi
+
+            chmod +x /var/www/tdesk/scripts/deploy-qas.sh
+            bash /var/www/tdesk/scripts/deploy-qas.sh

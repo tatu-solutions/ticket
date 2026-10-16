@@ -1,168 +1,280 @@
-import { Plan, Subscription, Organization } from '../models/index.js';
-import { Op } from 'sequelize';
-import { debug, info, warn, error } from '../../utils/debugLogger.js';
+import featureAccessService from '../../services/featureAccessService.js';
+import Plan from '../../models/Plan.js';
+import Subscription from '../../models/Subscription.js';
+import Organization from '../../modules/organizations/organizationModel.js';
+import logger from '../../config/logger.js';
 
-// Mapeamento de símbolos de moeda
-const currencySymbols = {
-  EUR: '€',
-  USD: '$',
-  BRL: 'R$',
-  AOA: 'Kz',
-  GBP: '£',
-  CHF: 'CHF',
-  JPY: '¥',
-  CNY: '¥'
-};
-
-// GET /api/plans - Listar todos os planos
-export const getPlans = async (req, res, next) => {
+/**
+ * Busca informações do plano atual da organização
+ */
+export const getOrganizationPlan = async (req, res) => {
   try {
-    const { isActive, search } = req.query;
+    const organizationId = req.user.organizationId || req.user.contextId;
 
-    const where = {};
-    
-    if (isActive !== undefined) {
-      where.isActive = isActive === 'true';
+    if (!organizationId) {
+      return res.status(400).json({
+        error: 'Organização não identificada'
+      });
     }
 
-    if (search) {
-      where[Op.or] = [
-        { name: { [Op.iLike]: `%${search}%` } },
-        { displayName: { [Op.iLike]: `%${search}%` } },
-        { description: { [Op.iLike]: `%${search}%` } }
-      ];
+    const planInfo = await featureAccessService.getOrganizationPlanInfo(organizationId);
+
+    if (!planInfo) {
+      return res.status(404).json({
+        error: 'Plano não encontrado',
+        message: 'Nenhum plano ativo encontrado para esta organização'
+      });
     }
 
-    const plans = await Plan.findAll({
-      where,
-      order: [['sortOrder', 'ASC'], ['monthlyPrice', 'ASC']],
-      attributes: {
-        include: [
-          // Contar organizações usando este plano
-          [
-            Plan.sequelize.literal(`(
-              SELECT COUNT(*)::int 
-              FROM subscriptions 
-              WHERE subscriptions."plan_id" = "Plan".id
-            )`),
-            'organizationCount'
-          ]
-        ]
-      }
-    });
-
-    const symbol = (currency) => currencySymbols[currency] || currency;
-
-    res.json({
-      success: true,
-      plans: plans.map(plan => ({
-        ...plan.toJSON(),
-        price: plan.monthlyPrice,
-        priceFormatted: `${symbol(plan.currency)} ${parseFloat(plan.monthlyPrice).toFixed(2)}`,
-        currencySymbol: symbol(plan.currency),
-        billingCycle: 'month',
-        limits: {
-          maxUsers: plan.maxUsers,
-          maxClients: plan.maxClients,
-          maxStorage: plan.maxStorageGB,
-          maxTicketsPerMonth: plan.maxTicketsPerMonth
-        }
-      }))
-    });
-
+    res.json(planInfo);
   } catch (error) {
-    error('Erro ao listar planos:', error);
-    next(error);
+    logger.error('Erro ao buscar plano da organização:', error);
+    res.status(500).json({
+      error: 'Erro ao buscar plano',
+      message: error.message
+    });
   }
 };
 
-// GET /api/plans/public - Listar planos ativos (público, para landing page)
-export const getPublicPlans = async (req, res, next) => {
+/**
+ * Busca features disponíveis para a organização
+ */
+export const getOrganizationFeatures = async (req, res) => {
+  try {
+    const organizationId = req.user.organizationId || req.user.contextId;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        error: 'Organização não identificada'
+      });
+    }
+
+    const features = await featureAccessService.getOrganizationFeatures(organizationId);
+
+    res.json({ features });
+  } catch (error) {
+    logger.error('Erro ao buscar features:', error);
+    res.status(500).json({
+      error: 'Erro ao buscar features',
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Verifica acesso a uma feature específica
+ */
+export const checkFeatureAccess = async (req, res) => {
+  try {
+    const { featureName } = req.params;
+    const organizationId = req.user.organizationId || req.user.contextId;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        error: 'Organização não identificada'
+      });
+    }
+
+    const hasAccess = await featureAccessService.checkFeatureAccess(
+      organizationId,
+      featureName
+    );
+
+    res.json({
+      featureName,
+      hasAccess
+    });
+  } catch (error) {
+    logger.error('Erro ao verificar feature:', error);
+    res.status(500).json({
+      error: 'Erro ao verificar feature',
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Verifica acesso a múltiplas features
+ */
+export const checkMultipleFeatures = async (req, res) => {
+  try {
+    const { features } = req.body;
+    const organizationId = req.user.organizationId || req.user.contextId;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        error: 'Organização não identificada'
+      });
+    }
+
+    if (!Array.isArray(features)) {
+      return res.status(400).json({
+        error: 'Features deve ser um array'
+      });
+    }
+
+    const accessResults = await featureAccessService.checkMultipleFeatures(
+      organizationId,
+      features
+    );
+
+    res.json({ features: accessResults });
+  } catch (error) {
+    logger.error('Erro ao verificar múltiplas features:', error);
+    res.status(500).json({
+      error: 'Erro ao verificar features',
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Busca informações de uso e limites
+ */
+export const getUsageInfo = async (req, res) => {
+  try {
+    const organizationId = req.user.organizationId || req.user.contextId;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        error: 'Organização não identificada'
+      });
+    }
+
+    const planInfo = await featureAccessService.getOrganizationPlanInfo(organizationId);
+
+    if (!planInfo) {
+      return res.status(404).json({
+        error: 'Plano não encontrado'
+      });
+    }
+
+    // Buscar contagens atuais (você pode expandir isso conforme necessário)
+    const usage = {
+      users: {
+        current: 0, // TODO: Implementar contagem real
+        limit: planInfo.limits.maxUsers,
+        percentage: 0
+      },
+      clients: {
+        current: 0, // TODO: Implementar contagem real
+        limit: planInfo.limits.maxClients,
+        percentage: 0
+      },
+      storage: {
+        current: 0, // TODO: Implementar contagem real
+        limit: planInfo.limits.maxStorageGB,
+        unit: 'GB',
+        percentage: 0
+      },
+      tickets: {
+        current: 0, // TODO: Implementar contagem real
+        limit: planInfo.limits.maxTicketsPerMonth,
+        period: 'month',
+        percentage: 0
+      }
+    };
+
+    res.json({
+      plan: planInfo,
+      usage
+    });
+  } catch (error) {
+    logger.error('Erro ao buscar informações de uso:', error);
+    res.status(500).json({
+      error: 'Erro ao buscar informações de uso',
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Busca planos disponíveis para upgrade
+ */
+export const getAvailablePlans = async (req, res) => {
   try {
     const plans = await Plan.findAll({
       where: { isActive: true },
       order: [['sortOrder', 'ASC'], ['monthlyPrice', 'ASC']],
-      attributes: ['id', 'name', 'displayName', 'description', 'monthlyPrice', 'yearlyPrice', 
-                   'currency', 'maxUsers', 'maxClients', 'maxStorageGB', 'maxTicketsPerMonth', 
-                   'features', 'featuresText', 'trialDays', 'isDefault']
+      attributes: [
+        'id',
+        'name',
+        'displayName',
+        'description',
+        'monthlyPrice',
+        'yearlyPrice',
+        'currency',
+        'maxUsers',
+        'maxClients',
+        'maxStorageGB',
+        'maxTicketsPerMonth',
+        'maxAttachmentSizeMB',
+        'features',
+        'featuresText',
+        'trialDays'
+      ]
     });
 
-    // Formatar para exibição na landing page
-    const formattedPlans = plans.map((plan, index) => {
-      const symbol = currencySymbols[plan.currency] || plan.currency;
-      const priceValue = parseFloat(plan.monthlyPrice);
-      
-      // Usar featuresText se disponível, senão gerar automaticamente
-      let features = [];
-      if (plan.featuresText && Array.isArray(plan.featuresText) && plan.featuresText.length > 0) {
-        features = plan.featuresText;
-      } else {
-        // Gerar features automaticamente baseado nos limites
-        features = [
-          plan.maxUsers === -1 ? 'Usuários ilimitados' : `Até ${plan.maxUsers} usuários`,
-          plan.maxTicketsPerMonth === null || plan.maxTicketsPerMonth === -1 
-            ? 'Tickets ilimitados' 
-            : `${plan.maxTicketsPerMonth} tickets/mês`,
-          ...getEnabledFeatures(plan.features)
-        ];
-      }
-
-      return {
-        id: plan.id,
-        name: plan.displayName,
-        planId: plan.name,
-        price: priceValue === 0 ? 'Grátis' : (priceValue === -1 ? 'Contacte-nos' : `${symbol}${priceValue}`),
-        priceValue: priceValue,
-        currency: plan.currency,
-        currencySymbol: symbol,
-        yearlyPrice: plan.yearlyPrice ? `${symbol}${parseFloat(plan.yearlyPrice)}` : null,
-        features: features,
-        highlighted: plan.isDefault || index === 1,
-        trialDays: plan.trialDays,
-        maxUsers: plan.maxUsers,
-        maxClients: plan.maxClients,
-        maxStorageGB: plan.maxStorageGB,
-        maxTicketsPerMonth: plan.maxTicketsPerMonth
-      };
-    });
-
-    res.json({
-      success: true,
-      plans: formattedPlans
-    });
-
+    res.json({ plans });
   } catch (error) {
-    error('Erro ao listar planos públicos:', error);
-    next(error);
+    logger.error('Erro ao buscar planos disponíveis:', error);
+    res.status(500).json({
+      error: 'Erro ao buscar planos',
+      message: error.message
+    });
   }
 };
 
-// Helper para obter features habilitadas
-function getEnabledFeatures(features) {
-  if (!features || typeof features !== 'object') return [];
-  
-  const featureLabels = {
-    basicTicketing: 'Tickets básicos',
-    emailIntegration: 'Integração de email',
-    knowledgeBase: 'Base de conhecimento',
-    slaManagement: 'Gestão de SLA',
-    reporting: 'Relatórios',
-    automation: 'Automações',
-    apiAccess: 'Acesso à API',
-    whiteLabel: 'White-label',
-    prioritySupport: 'Suporte prioritário',
-    customFields: 'Campos personalizados',
-    workflows: 'Workflows',
-    integrations: 'Integrações avançadas'
-  };
+export default {
+  getOrganizationPlan,
+  getOrganizationFeatures,
+  checkFeatureAccess,
+  checkMultipleFeatures,
+  getUsageInfo,
+  getAvailablePlans
+};
 
-  return Object.entries(features)
-    .filter(([key, value]) => value === true && featureLabels[key])
-    .map(([key]) => featureLabels[key]);
-}
+/**
+ * CRUD de Planos para Backoffice (Provider)
+ */
 
-// GET /api/plans/:id - Obter plano por ID
-export const getPlanById = async (req, res, next) => {
+/**
+ * Listar todos os planos (para backoffice)
+ */
+export const getPlans = async (req, res) => {
+  try {
+    const plans = await Plan.findAll({
+      order: [['sortOrder', 'ASC'], ['monthlyPrice', 'ASC']]
+    });
+
+    // Contar subscriptions por plano
+    const plansWithCount = await Promise.all(
+      plans.map(async (plan) => {
+        const subscriptionCount = await Subscription.count({
+          where: { planId: plan.id, status: 'active' }
+        });
+
+        return {
+          ...plan.toJSON(),
+          organizationCount: subscriptionCount
+        };
+      })
+    );
+
+    res.json({ plans: plansWithCount });
+  } catch (error) {
+    logger.error('Erro ao listar planos:', error);
+    res.status(500).json({
+      error: 'Erro ao listar planos',
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Buscar plano por ID (para backoffice)
+ */
+export const getPlanById = async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -170,146 +282,116 @@ export const getPlanById = async (req, res, next) => {
 
     if (!plan) {
       return res.status(404).json({
-        success: false,
         error: 'Plano não encontrado'
       });
     }
 
-    // Contar organizações usando este plano
-    const organizationCount = await Subscription.count({
-      where: { planId: id }
+    // Contar subscriptions
+    const subscriptionCount = await Subscription.count({
+      where: { planId: id, status: 'active' }
     });
 
     res.json({
-      success: true,
       plan: {
         ...plan.toJSON(),
-        organizationCount
+        organizationCount: subscriptionCount
       }
     });
-
   } catch (error) {
-    error('Erro ao buscar plano:', error);
-    next(error);
+    logger.error('Erro ao buscar plano:', error);
+    res.status(500).json({
+      error: 'Erro ao buscar plano',
+      message: error.message
+    });
   }
 };
 
-// POST /api/plans - Criar novo plano
-export const createPlan = async (req, res, next) => {
+/**
+ * Criar novo plano (para backoffice)
+ */
+export const createPlan = async (req, res) => {
   try {
-    const {
-      name,
-      displayName,
-      description,
-      monthlyPrice,
-      yearlyPrice,
-      currency = 'EUR',
-      maxUsers,
-      maxClients,
-      maxStorageGB,
-      maxTicketsPerMonth,
-      maxAttachmentSizeMB = 25,
-      features = {},
-      featuresText = [],
-      trialDays = 14,
-      isDefault = false,
-      sortOrder
-    } = req.body;
+    const planData = req.body;
 
-    // Validações
-    if (!name || !displayName) {
+    // Validar dados obrigatórios
+    if (!planData.name || !planData.displayName) {
       return res.status(400).json({
-        success: false,
         error: 'Nome e nome de exibição são obrigatórios'
       });
     }
 
-    // Verificar se nome já existe
-    const existing = await Plan.findOne({ where: { name } });
-    if (existing) {
+    // Verificar se já existe plano com esse nome
+    const existingPlan = await Plan.findOne({
+      where: { name: planData.name }
+    });
+
+    if (existingPlan) {
       return res.status(400).json({
-        success: false,
         error: 'Já existe um plano com este nome'
       });
     }
 
-    // Se este plano for o padrão, remover flag dos outros
-    if (isDefault) {
-      await Plan.update({ isDefault: false }, { where: {} });
-    }
+    const plan = await Plan.create(planData);
 
-    const plan = await Plan.create({
-      name,
-      displayName,
-      description,
-      monthlyPrice: monthlyPrice || 0,
-      yearlyPrice: yearlyPrice || (monthlyPrice ? monthlyPrice * 10 : 0),
-      currency,
-      maxUsers: maxUsers || 10,
-      maxClients: maxClients || 50,
-      maxStorageGB: maxStorageGB || 5,
-      maxTicketsPerMonth: maxTicketsPerMonth || 500,
-      maxAttachmentSizeMB,
-      features,
-      featuresText,
-      trialDays,
-      isDefault,
-      isActive: true,
-      sortOrder: sortOrder || 0
-    });
+    logger.info(`Plano criado: ${plan.name} (${plan.id})`);
 
-    debug(`✅ Plano criado: ${plan.displayName}`);
-
-    res.status(201).json({
-      success: true,
-      message: 'Plano criado com sucesso',
-      plan
-    });
-
+    res.status(201).json({ plan });
   } catch (error) {
-    error('Erro ao criar plano:', error);
-    next(error);
+    logger.error('Erro ao criar plano:', error);
+    res.status(500).json({
+      error: 'Erro ao criar plano',
+      message: error.message
+    });
   }
 };
 
-// PUT /api/plans/:id - Atualizar plano
-export const updatePlan = async (req, res, next) => {
+/**
+ * Atualizar plano (para backoffice)
+ */
+export const updatePlan = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const planData = req.body;
 
     const plan = await Plan.findByPk(id);
 
     if (!plan) {
       return res.status(404).json({
-        success: false,
         error: 'Plano não encontrado'
       });
     }
 
-    // Se este plano for o padrão, remover flag dos outros
-    if (updates.isDefault) {
-      await Plan.update({ isDefault: false }, { where: { id: { [Op.ne]: id } } });
+    // Não permitir alterar o nome se já tem subscriptions ativas
+    if (planData.name && planData.name !== plan.name) {
+      const subscriptionCount = await Subscription.count({
+        where: { planId: id, status: 'active' }
+      });
+
+      if (subscriptionCount > 0) {
+        return res.status(400).json({
+          error: 'Não é possível alterar o nome de um plano com assinaturas ativas'
+        });
+      }
     }
 
-    await plan.update(updates);
+    await plan.update(planData);
 
-    debug(`✅ Plano atualizado: ${plan.displayName}`);
+    logger.info(`Plano atualizado: ${plan.name} (${plan.id})`);
 
-    res.json({
-      success: true,
-      message: 'Plano atualizado com sucesso',
-      plan
-    });
-
+    res.json({ plan });
   } catch (error) {
-    error('Erro ao atualizar plano:', error);
-    next(error);
+    logger.error('Erro ao atualizar plano:', error);
+    res.status(500).json({
+      error: 'Erro ao atualizar plano',
+      message: error.message
+    });
   }
 };
 
-// DELETE /api/plans/:id - Deletar plano (soft delete - desativar)
-export const deletePlan = async (req, res, next) => {
+/**
+ * Deletar plano (para backoffice)
+ */
+export const deletePlan = async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -317,40 +399,43 @@ export const deletePlan = async (req, res, next) => {
 
     if (!plan) {
       return res.status(404).json({
-        success: false,
         error: 'Plano não encontrado'
       });
     }
 
-    // Verificar se há organizações usando este plano
+    // Verificar se tem subscriptions ativas
     const subscriptionCount = await Subscription.count({
-      where: { planId: id }
+      where: { planId: id, status: 'active' }
     });
 
     if (subscriptionCount > 0) {
       return res.status(400).json({
-        success: false,
-        error: `Não é possível excluir este plano. ${subscriptionCount} organização(ões) estão usando-o.`
+        error: 'Não é possível deletar um plano com assinaturas ativas',
+        message: `Este plano tem ${subscriptionCount} assinatura(s) ativa(s)`
       });
     }
 
     await plan.destroy();
 
-    debug(`✅ Plano excluído: ${plan.displayName}`);
+    logger.info(`Plano deletado: ${plan.name} (${plan.id})`);
 
     res.json({
       success: true,
-      message: 'Plano excluído com sucesso'
+      message: 'Plano deletado com sucesso'
     });
-
   } catch (error) {
-    error('Erro ao excluir plano:', error);
-    next(error);
+    logger.error('Erro ao deletar plano:', error);
+    res.status(500).json({
+      error: 'Erro ao deletar plano',
+      message: error.message
+    });
   }
 };
 
-// PUT /api/plans/:id/activate - Ativar plano
-export const activatePlan = async (req, res, next) => {
+/**
+ * Ativar plano (para backoffice)
+ */
+export const activatePlan = async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -358,27 +443,28 @@ export const activatePlan = async (req, res, next) => {
 
     if (!plan) {
       return res.status(404).json({
-        success: false,
         error: 'Plano não encontrado'
       });
     }
 
     await plan.update({ isActive: true });
 
-    res.json({
-      success: true,
-      message: 'Plano ativado com sucesso',
-      plan
-    });
+    logger.info(`Plano ativado: ${plan.name} (${plan.id})`);
 
+    res.json({ plan });
   } catch (error) {
-    error('Erro ao ativar plano:', error);
-    next(error);
+    logger.error('Erro ao ativar plano:', error);
+    res.status(500).json({
+      error: 'Erro ao ativar plano',
+      message: error.message
+    });
   }
 };
 
-// PUT /api/plans/:id/deactivate - Desativar plano
-export const deactivatePlan = async (req, res, next) => {
+/**
+ * Desativar plano (para backoffice)
+ */
+export const deactivatePlan = async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -386,75 +472,91 @@ export const deactivatePlan = async (req, res, next) => {
 
     if (!plan) {
       return res.status(404).json({
-        success: false,
         error: 'Plano não encontrado'
-      });
-    }
-
-    // Verificar se há organizações usando este plano
-    const subscriptionCount = await Subscription.count({
-      where: { planId: id, status: { [Op.in]: ['active', 'trial'] } }
-    });
-
-    if (subscriptionCount > 0) {
-      return res.status(400).json({
-        success: false,
-        error: `Não é possível desativar este plano. ${subscriptionCount} organização(ões) ativas estão usando-o.`
       });
     }
 
     await plan.update({ isActive: false });
 
-    res.json({
-      success: true,
-      message: 'Plano desativado com sucesso',
-      plan
-    });
+    logger.info(`Plano desativado: ${plan.name} (${plan.id})`);
 
+    res.json({ plan });
   } catch (error) {
-    error('Erro ao desativar plano:', error);
-    next(error);
+    logger.error('Erro ao desativar plano:', error);
+    res.status(500).json({
+      error: 'Erro ao desativar plano',
+      message: error.message
+    });
   }
 };
 
-// GET /api/plans/:id/subscriptions - Listar assinaturas do plano
-export const getPlanSubscriptions = async (req, res, next) => {
+/**
+ * Buscar subscriptions de um plano (para backoffice)
+ */
+export const getPlanSubscriptions = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, page = 1, limit = 20 } = req.query;
 
-    const where = { planId: id };
-    if (status) {
-      where.status = status;
+    const plan = await Plan.findByPk(id);
+
+    if (!plan) {
+      return res.status(404).json({
+        error: 'Plano não encontrado'
+      });
     }
 
-    const { count, rows: subscriptions } = await Subscription.findAndCountAll({
-      where,
+    const subscriptions = await Subscription.findAll({
+      where: { planId: id },
       include: [{
         model: Organization,
         as: 'organization',
-        attributes: ['id', 'name', 'slug', 'email']
+        attributes: ['id', 'name', 'slug']
       }],
-      order: [['createdAt', 'DESC']],
-      limit: parseInt(limit),
-      offset: (parseInt(page) - 1) * parseInt(limit)
+      order: [['createdAt', 'DESC']]
     });
 
-    res.json({
-      success: true,
-      subscriptions,
-      pagination: {
-        total: count,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(count / parseInt(limit))
-      }
-    });
-
+    res.json({ subscriptions });
   } catch (error) {
-    error('Erro ao listar assinaturas:', error);
-    next(error);
+    logger.error('Erro ao buscar subscriptions do plano:', error);
+    res.status(500).json({
+      error: 'Erro ao buscar subscriptions',
+      message: error.message
+    });
   }
 };
 
+/**
+ * Buscar planos públicos (para landing page)
+ */
+export const getPublicPlans = async (req, res) => {
+  try {
+    const plans = await Plan.findAll({
+      where: { isActive: true },
+      order: [['sortOrder', 'ASC'], ['monthlyPrice', 'ASC']],
+      attributes: [
+        'id',
+        'name',
+        'displayName',
+        'description',
+        'monthlyPrice',
+        'yearlyPrice',
+        'currency',
+        'maxUsers',
+        'maxClients',
+        'maxStorageGB',
+        'maxTicketsPerMonth',
+        'featuresText',
+        'trialDays',
+        'isDefault'
+      ]
+    });
 
+    res.json({ plans });
+  } catch (error) {
+    logger.error('Erro ao buscar planos públicos:', error);
+    res.status(500).json({
+      error: 'Erro ao buscar planos',
+      message: error.message
+    });
+  }
+};

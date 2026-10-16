@@ -4,6 +4,7 @@ import { ArrowLeft, Save, Plus, X } from 'lucide-react';
 import Card from '../../components/common/Card';
 import Button from '../../components/common/Button';
 import Input from '../../components/common/Input';
+import FeatureSelector from '../../components/FeatureSelector';
 import planService from '../../services/planService';
 import { showSuccess, showError } from '../../utils/alerts';
 
@@ -35,34 +36,22 @@ const CreatePlan = () => {
     isDefault: false,
     sortOrder: 0,
     featuresText: [],
-    features: {
-      basicTicketing: true,
-      emailIntegration: true,
-      knowledgeBase: false,
-      slaManagement: false,
-      reporting: false,
-      automation: false,
-      apiAccess: false,
-      whiteLabel: false,
-      prioritySupport: false
-    }
+    features: {}
   });
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    
-    if (name.startsWith('features.')) {
-      const featureName = name.split('.')[1];
-      setFormData(prev => ({
-        ...prev,
-        features: { ...prev.features, [featureName]: checked }
-      }));
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        [name]: type === 'checkbox' ? checked : (type === 'number' ? parseFloat(value) || 0 : value)
-      }));
-    }
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : (type === 'number' ? parseFloat(value) || 0 : value)
+    }));
+  };
+
+  const handleFeaturesChange = (newFeatures) => {
+    setFormData(prev => ({
+      ...prev,
+      features: newFeatures
+    }));
   };
 
   const addFeatureText = () => {
@@ -164,19 +153,10 @@ const CreatePlan = () => {
 
           <div className="space-y-6">
             <Card>
-              <h2 className="text-lg font-semibold mb-4 dark:text-white">Funcionalidades do Sistema</h2>
-              <div className="space-y-3">
-                {[['basicTicketing', 'Tickets Básicos'], ['emailIntegration', 'Integração Email'], ['knowledgeBase', 'Base de Conhecimento'],
-                  ['slaManagement', 'Gestão de SLA'], ['reporting', 'Relatórios'], ['automation', 'Automações'],
-                  ['apiAccess', 'Acesso à API'], ['whiteLabel', 'White-label'], ['prioritySupport', 'Suporte Prioritário']
-                ].map(([key, label]) => (
-                  <label key={key} className="flex items-center gap-2">
-                    <input type="checkbox" name={`features.${key}`} checked={formData.features[key] || false} onChange={handleChange}
-                      className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500" />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">{label}</span>
-                  </label>
-                ))}
-              </div>
+              <FeatureSelector
+                selectedFeatures={formData.features}
+                onChange={handleFeaturesChange}
+              />
             </Card>
 
             <Card>

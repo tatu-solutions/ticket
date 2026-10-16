@@ -1,27 +1,29 @@
 node_modules
-backend/node_modules
-portalBackofficeSis/node_modules
-portalClientEmpresa/node_modules
-portalOrganizaçãoTenant/node_modules
-portalSaaS/node_modules
+**/node_modules
 dist
+**/dist
 .DS_Store
+**/.DS_Store
 vite.config.ts.*
 *.tar.gz
 
 # Arquivos de ambiente e configuração sensível
-backend/.env
-backend/.env.local
-backend/.env.production
-backend/.env.staging
-backend/backups
 .env
-.env.local
-.env.production
-.env.staging
+.env.*
+!.env.example
+!.env.production.example
+!.env.test
+backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.production.example
+!backend/.env.test
+backend/backups
 *.pem
 *.key
 *.crt
+senha.txt
+**/senha.txt
 
 # Logs
 logs
@@ -46,4 +48,4 @@ archive/
 
 # Arquivos de sistema
 Thumbs.db
-ehthumbs.dbbackend/senha.txt
+ehthumbs.db

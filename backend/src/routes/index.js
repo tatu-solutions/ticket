@@ -44,6 +44,7 @@ import * as landingPageController from '../modules/landingPage/landingPageContro
 import * as downloadController from '../modules/downloads/downloadController.js';
 import debugUserRoutes from './debugUserRoutes.js';
 import fixTicketsRoutes from './fixTicketsRoutes.js';
+import planRoutes from '../modules/plans/planRoutes.js';
 
 const router = express.Router();
 
@@ -239,22 +240,6 @@ router.get('/organizations/:id/clients', authenticate, authorize('super-admin', 
 
 // ==================== SAAS (Onboarding & Plan Management) ====================
 router.use('/saas', saasRoutes);
-
-// ==================== PLANS (Gestão de Planos SaaS) ====================
-import * as planController from '../modules/plans/planController.js';
-
-// Rota pública - planos para landing page
-router.get('/plans/public', planController.getPublicPlans);
-
-// Rotas admin - requer autenticação
-router.get('/plans', authenticate, authorize('super-admin', 'provider-admin'), planController.getPlans);
-router.get('/plans/:id', authenticate, authorize('super-admin', 'provider-admin'), planController.getPlanById);
-router.post('/plans', authenticate, authorize('super-admin', 'provider-admin'), auditLog('create', 'plan'), planController.createPlan);
-router.put('/plans/:id', authenticate, authorize('super-admin', 'provider-admin'), auditLog('update', 'plan'), planController.updatePlan);
-router.delete('/plans/:id', authenticate, authorize('super-admin', 'provider-admin'), auditLog('delete', 'plan'), planController.deletePlan);
-router.put('/plans/:id/activate', authenticate, authorize('super-admin', 'provider-admin'), auditLog('update', 'plan'), planController.activatePlan);
-router.put('/plans/:id/deactivate', authenticate, authorize('super-admin', 'provider-admin'), auditLog('update', 'plan'), planController.deactivatePlan);
-router.get('/plans/:id/subscriptions', authenticate, authorize('super-admin', 'provider-admin'), planController.getPlanSubscriptions);
 
 // ==================== PAYMENTS (Gestão de Pagamentos TPagamento) ====================
 import paymentRoutes from '../modules/payments/paymentRoutes.js';
@@ -561,6 +546,25 @@ router.use('/projects', projectRoutes);
 // ==================== REPORTS ====================
 import reportsRoutes from '../modules/reports/reportsRoutes.js';
 router.use('/reports', reportsRoutes);
+
+// ==================== PLANS (Gestão de Planos e Features) ====================
+import * as planControllerCRUD from '../modules/plans/planController.js';
+
+// Rota pública - planos para landing page
+router.get('/plans/public', planControllerCRUD.getPublicPlans);
+
+// Rotas de CRUD para backoffice (provider)
+router.get('/plans', authenticate, authorize('super-admin', 'provider-admin'), planControllerCRUD.getPlans);
+router.post('/plans', authenticate, authorize('super-admin', 'provider-admin'), auditLog('create', 'plan'), planControllerCRUD.createPlan);
+router.get('/plans/:id/subscriptions', authenticate, authorize('super-admin', 'provider-admin'), planControllerCRUD.getPlanSubscriptions);
+router.get('/plans/:id', authenticate, authorize('super-admin', 'provider-admin'), planControllerCRUD.getPlanById);
+router.put('/plans/:id', authenticate, authorize('super-admin', 'provider-admin'), auditLog('update', 'plan'), planControllerCRUD.updatePlan);
+router.delete('/plans/:id', authenticate, authorize('super-admin', 'provider-admin'), auditLog('delete', 'plan'), planControllerCRUD.deletePlan);
+router.put('/plans/:id/activate', authenticate, authorize('super-admin', 'provider-admin'), auditLog('update', 'plan'), planControllerCRUD.activatePlan);
+router.put('/plans/:id/deactivate', authenticate, authorize('super-admin', 'provider-admin'), auditLog('update', 'plan'), planControllerCRUD.deactivatePlan);
+
+// Rotas para organizações (features e limites) - usar prefixo diferente
+router.use('/plan-features', planRoutes);
 
 export default router;
 
